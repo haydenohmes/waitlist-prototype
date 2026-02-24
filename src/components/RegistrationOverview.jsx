@@ -32,6 +32,7 @@ const RegistrationOverview = ({
   const [selectedRows, setSelectedRows] = useState(new Set());
   const [showInviteDrawer, setShowInviteDrawer] = useState(false);
   const [invitedAthletes, setInvitedAthletes] = useState(new Set());
+  const [inviteStatusMap, setInviteStatusMap] = useState({}); // 'invited' | 'expired' | 'declined' per index
   const [removedAthletes, setRemovedAthletes] = useState(new Set());
   const [waitlistSearchQuery, setWaitlistSearchQuery] = useState('');
   const [isClosingWaitlist, setIsClosingWaitlist] = useState(false);
@@ -60,6 +61,34 @@ const RegistrationOverview = ({
     const newValue = !waitlistOpen;
     setWaitlistOpen(newValue);
     setToastMessage(newValue ? 'Waitlists opened' : 'Waitlists closed');
+  };
+
+  // Cycle status: Waitlist → Invited → Expired → Declined → Waitlist (any athlete can be changed anytime)
+  const cycleInviteStatus = (index) => {
+    if (removedAthletes.has(index)) return;
+    if (invitedAthletes.has(index)) {
+      const current = inviteStatusMap[index] || 'invited';
+      if (current === 'declined') {
+        // Back to Waitlist
+        setInvitedAthletes(prev => {
+          const next = new Set(prev);
+          next.delete(index);
+          return next;
+        });
+        setInviteStatusMap(prev => {
+          const next = { ...prev };
+          delete next[index];
+          return next;
+        });
+      } else {
+        const next = current === 'invited' ? 'expired' : 'declined';
+        setInviteStatusMap(prev => ({ ...prev, [index]: next }));
+      }
+    } else {
+      // Currently Waitlist: set to Invited
+      setInvitedAthletes(prev => new Set(prev).add(index));
+      setInviteStatusMap(prev => ({ ...prev, [index]: 'invited' }));
+    }
   };
 
   // All waitlist athletes data
@@ -1137,37 +1166,79 @@ const RegistrationOverview = ({
           )}
 
           {activeTab === 'waitlist' && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--u-space-half, 8px)' }}>
+            <div className="waitlist-section" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--u-space-quarter, 4px)' }}>
+              {/* Waitlist summary - two equal widgets: Waitlist (count) and Waitlist Value (dollar) */}
+              <div className="registration-overview-widgets waitlist-widget-wrapper" style={{ marginBottom: 0 }}>
+                <DataWidget
+                  label="Waitlist Registrants"
+                  value={waitlistOpen ? waitlistAthletesData.length.toString() : '0'}
+                  size="medium"
+                  avatar={null}
+                  subheader={null}
+                  labelTooltip="Number of athletes on the waitlist for this registration"
+                  rows={[]}
+                />
+                <DataWidget
+                  label="Waitlist Value"
+                  value={waitlistOpen ? `$${(waitlistAthletesData.length * 385).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$0.00'}
+                  size="medium"
+                  avatar={null}
+                  subheader={null}
+                  labelTooltip="Potential revenue from waitlist athletes"
+                  rows={[]}
+                />
+              </div>
               <style>
                 {`
-                  .waitlist-toolbar-container {
-                    display: flex;
-                    align-items: center;
-                    gap: var(--u-space-one-half, 24px);
+                  .waitlist-widget-wrapper {
                     width: 100%;
                     justify-content: space-between;
-                    padding-left: var(--u-space-one, 16px);
-                    padding-right: var(--u-space-one, 16px);
-                    position: relative;
-                    min-height: 40px;
                   }
 
-                  .waitlist-toolbar-search-wrapper {
-                    flex: 0 0 197px;
+                  .waitlist-widget-wrapper .data-widget {
+                    flex: 1;
                     min-width: 0;
-                    margin-left: auto;
+                  }
+
+                  .waitlist-section {
+                    --waitlist-right: var(--u-space-one, 16px);
+                  }
+
+                  .waitlist-action-bar {
+                    display: flex;
+                    align-items: center;
+                    width: 100%;
+                    position: relative;
+                    min-height: 40px;
+                    padding-left: var(--u-space-one, 16px);
+                    padding-right: var(--waitlist-right);
+                    box-sizing: border-box;
                   }
 
                   .waitlist-closed-banner {
                     display: flex;
                     align-items: stretch;
+                    width: 100%;
                     background-color: #ffffff;
                     border-radius: var(--u-border-radius-small, 4px);
                     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
                     overflow: hidden;
-                    flex: 1;
+                  }
+
+                  .waitlist-title-row {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    width: 100%;
+                    gap: var(--u-space-one, 16px);
+                    padding-left: var(--u-space-one, 16px);
+                    padding-right: var(--waitlist-right);
+                    padding-bottom: var(--u-space-quarter, 4px);
+                  }
+
+                  .waitlist-title-row .table-toolbar {
+                    flex: 0 0 197px;
                     min-width: 0;
-                    max-width: calc(100% - 197px - 24px);
                   }
 
                   .waitlist-closed-banner-icon-section {
@@ -1277,16 +1348,15 @@ const RegistrationOverview = ({
                     z-index: 1;
                     height: 48px;
                     cursor: pointer;
-                    border-bottom: 1px dashed var(--u-color-line-subtle, #c4c6c8) !important;
-                  }
-
-                  .waitlist-table tbody tr:last-child {
-                    border-bottom: none;
                   }
 
                   .waitlist-table tbody tr:hover {
                     background-color: var(--u-color-background-subtle, #f5f6f7);
                     z-index: 10;
+                  }
+
+                  .waitlist-table-container.waitlist-closed .waitlist-table tbody tr:hover {
+                    background-color: transparent;
                   }
 
                   .waitlist-table td {
@@ -1378,9 +1448,36 @@ const RegistrationOverview = ({
                     color: #6F3900;
                   }
 
+                  .waitlist-status-pill.expired {
+                    background-color: #ebe3d8;
+                    color: #5c4d3a;
+                  }
+
+                  .waitlist-status-pill.declined {
+                    background-color: #FFE5E5;
+                    color: #BB1700;
+                  }
+
                   .waitlist-status-pill.removed {
                     background-color: #FFE5E5;
                     color: #DC3545;
+                  }
+
+                  .waitlist-status-pill-clickable {
+                    cursor: pointer;
+                    border: none;
+                    font-family: var(--u-font-body);
+                    font-weight: var(--u-font-weight-bold, 700);
+                    font-size: var(--u-font-size-micro, 12px);
+                    line-height: 1.4;
+                    padding: 4px 12px;
+                    margin: 0;
+                    display: inline-block;
+                    border-radius: var(--u-border-radius-medium, 4px);
+                  }
+
+                  .waitlist-status-pill-clickable:hover {
+                    opacity: 0.9;
                   }
 
                   .waitlist-checkbox {
@@ -1399,16 +1496,11 @@ const RegistrationOverview = ({
                     padding: 0;
                     min-height: 40px;
                     height: 40px;
+                    width: 100%;
                     background-color: var(--u-color-emphasis-background-contrast, #0273e3);
                     color: var(--u-color-emphasis-foreground-contrast, #ffffff);
                     border-radius: var(--u-border-radius-large, 4px);
                     margin-bottom: 0;
-                    position: absolute;
-                    left: 0;
-                    right: calc(197px + var(--u-space-one-half, 24px));
-                    width: calc(100% - 197px - var(--u-space-one-half, 24px));
-                    max-width: none;
-                    z-index: 10;
                   }
 
                   .waitlist-bulk-action-bar-left {
@@ -1471,7 +1563,7 @@ const RegistrationOverview = ({
                   }
                 `}
               </style>
-              <div className="waitlist-toolbar-container">
+              <div className="waitlist-action-bar">
                 {!waitlistOpen && selectedRows.size === 0 && (
                   <div className="waitlist-closed-banner">
                     <div className="waitlist-closed-banner-icon-section">
@@ -1532,16 +1624,20 @@ const RegistrationOverview = ({
                     </div>
                   </div>
                 )}
-                <div className="waitlist-toolbar-search-wrapper">
-                  <TableToolbar
-                    title=""
-                    showFilter={false}
-                    onSearch={(value) => setWaitlistSearchQuery(value)}
-                    showDownload={false}
-                  />
-                </div>
               </div>
-              <div className="waitlist-table-container">
+              <div className="waitlist-title-row" style={{ marginTop: 'var(--u-space-one, 16px)' }}>
+                <h2 className="waitlist-table-title" style={{ margin: 0, fontFamily: 'var(--u-font-body)', fontWeight: 'var(--u-font-weight-bold, 700)', fontSize: 'var(--u-font-size-default, 16px)', color: 'var(--u-color-base-foreground-contrast, #071c31)', lineHeight: 1.2 }}>
+                  Waitlist Registrants
+                </h2>
+                <TableToolbar
+                  title=""
+                  showFilter={false}
+                  searchPlaceholder="Search by Name"
+                  onSearch={(value) => setWaitlistSearchQuery(value)}
+                  showDownload={false}
+                />
+              </div>
+              <div className={`waitlist-table-container${!waitlistOpen ? ' waitlist-closed' : ''}`}>
                 <table className="waitlist-table">
                   <thead>
                     <tr>
@@ -1591,7 +1687,7 @@ const RegistrationOverview = ({
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredWaitlistAthletes.length > 0 ? (
+                    {!waitlistOpen ? null : filteredWaitlistAthletes.length > 0 ? (
                       filteredWaitlistAthletes.map((athlete, filteredIndex) => {
                         // Find the original index in waitlistAthletesData
                         const originalIndex = waitlistAthletesData.findIndex(a => a.name === athlete.name);
@@ -1665,13 +1761,33 @@ const RegistrationOverview = ({
                             return `${athlete.dateAdded} at ${time}`;
                           })()}</td>
                           <td>
-                            <span className={`waitlist-status-pill ${
-                              removedAthletes.has(originalIndex) ? 'removed' : 
-                              invitedAthletes.has(originalIndex) ? 'invited' : ''
-                            }`}>
-                              {removedAthletes.has(originalIndex) ? 'Removed' : 
-                               invitedAthletes.has(originalIndex) ? 'Invited' : 'Waitlist'}
-                            </span>
+                            {removedAthletes.has(originalIndex) ? (
+                              <span className="waitlist-status-pill removed">Removed</span>
+                            ) : invitedAthletes.has(originalIndex) ? (
+                              (() => {
+                                const subStatus = inviteStatusMap[originalIndex] || 'invited';
+                                const label = subStatus === 'invited' ? 'Invited' : subStatus === 'expired' ? 'Expired' : 'Declined';
+                                return (
+                                  <button
+                                    type="button"
+                                    className={`waitlist-status-pill waitlist-status-pill-clickable ${subStatus}`}
+                                    onClick={(e) => { e.stopPropagation(); cycleInviteStatus(originalIndex); }}
+                                    title="Click to cycle: Invited → Expired → Declined → Waitlist"
+                                  >
+                                    {label}
+                                  </button>
+                                );
+                              })()
+                            ) : (
+                              <button
+                                type="button"
+                                className="waitlist-status-pill waitlist-status-pill-clickable"
+                                onClick={(e) => { e.stopPropagation(); cycleInviteStatus(originalIndex); }}
+                                title="Click to cycle: Waitlist → Invited → Expired → Declined → Waitlist"
+                              >
+                                Waitlist
+                              </button>
+                            )}
                           </td>
                         </tr>
                         );
@@ -2269,7 +2385,7 @@ const RegistrationOverview = ({
                 {!isClosingWaitlist && (
                   <div className="invite-drawer-field">
                     <label className="invite-drawer-label">
-                      Registration Link{registrationLinks.length > 1 ? 's' : ''}
+                      Registration Link
                     </label>
                     <div style={{ display: 'flex', gap: 'var(--u-space-half, 8px)', alignItems: 'center' }}>
                       <input
@@ -2288,7 +2404,7 @@ const RegistrationOverview = ({
                       </button>
                     </div>
                     <p className="invite-drawer-help-text">
-                      This link{registrationLinks.length > 1 ? 's will' : ' will'} be automatically included in your message.
+                      This link will be automatically included in your message.
                     </p>
                   </div>
                 )}
@@ -2389,10 +2505,15 @@ const RegistrationOverview = ({
                   } else {
                     // Capture count before clearing
                     const count = selectedRows.size;
-                    // Add selected athletes to invited set
+                    // Add selected athletes to invited set with status 'invited'
                     const newInvited = new Set(invitedAthletes);
-                    selectedRows.forEach(index => newInvited.add(index));
+                    const newStatusMap = { ...inviteStatusMap };
+                    selectedRows.forEach(index => {
+                      newInvited.add(index);
+                      newStatusMap[index] = 'invited';
+                    });
                     setInvitedAthletes(newInvited);
+                    setInviteStatusMap(newStatusMap);
                     // Automatically append registration link to message if not already included
                     let finalMessage = messageText;
                     if (registrationLinks.length > 0) {
